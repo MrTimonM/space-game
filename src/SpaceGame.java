@@ -3,6 +3,7 @@ import java.awt.*;
 import java.awt.event.*;
 import java.awt.image.BufferedImage;
 import javax.imageio.ImageIO;
+import javax.sound.sampled.*;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Random;
@@ -16,14 +17,20 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
     private Player player;
     private ArrayList<Rock> rocks;
     private ArrayList<Bullet> bullets;
+    private ArrayList<Enemy> enemies;
+    private ArrayList<EnemyBullet> enemyBullets;
     private Random random;
     private BufferedImage asteroidSheet;
     private BufferedImage backgroundSheet;
     private BufferedImage playerSheet;
+    private BufferedImage enemySheet;
     private BufferedImage exhaustSheet;
     private BufferedImage bulletSheet;
     private double backgroundOffsetY;
     private int spawnTimer;
+    private int enemySpawnTimer;
+    private int killCount;
+    private Clip musicClip;
     public static final int ROCK_SCALE = 2;  // Double the rock size
     
     public SpaceGame() {
@@ -35,12 +42,18 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
         random = new Random();
         rocks = new ArrayList<>();
         bullets = new ArrayList<>();
+        enemies = new ArrayList<>();
+        enemyBullets = new ArrayList<>();
         backgroundOffsetY = 0;
         spawnTimer = 0;
+        enemySpawnTimer = 0;
+        killCount = 0;
         
         loadImages();
         
         player = new Player(WINDOW_WIDTH / 2 - 32, WINDOW_HEIGHT - 100, playerSheet, exhaustSheet);
+        
+        playMusic();
         
         gameTimer = new Timer(16, this); // ~60 FPS
         gameTimer.start();
@@ -51,10 +64,25 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
             asteroidSheet = ImageIO.read(new File("../Assets/Asteroids-0001.png"));
             backgroundSheet = ImageIO.read(new File("../Assets/Background_Full-0001.png"));
             playerSheet = ImageIO.read(new File("../Assets/SpaceShips_Player-0001.png"));
+            enemySheet = ImageIO.read(new File("../Assets/SpaceShips_Enemy-0001.png"));
             exhaustSheet = ImageIO.read(new File("../Assets/Exhaust-0001.png"));
             bulletSheet = ImageIO.read(new File("../Assets/Bullets-0001.png"));
         } catch (Exception e) {
             System.err.println("Error loading images: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+    
+    private void playMusic() {
+        try {
+            File musicFile = new File("../Assets/music.wav");
+            AudioInputStream audioStream = AudioSystem.getAudioInputStream(musicFile);
+            musicClip = AudioSystem.getClip();
+            musicClip.open(audioStream);
+            musicClip.loop(Clip.LOOP_CONTINUOUSLY);
+            musicClip.start();
+        } catch (Exception e) {
+            System.err.println("Error loading music: " + e.getMessage());
             e.printStackTrace();
         }
     }
@@ -97,11 +125,95 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
             }
         }
         
+        // Update enemies
+        for (int i = enemies.size() - 1; i >= 0; i--) {
+            Enemy enemy = enemies.get(i);
+            enemy.update();
+            
+            // Enemy shoots occasionally
+            if (random.nextInt(100) < 2) { // 2% chance per frame
+                enemy.shoot(enemyBullets, bulletSheet);
+            }
+            
+            // Remove enemies that are off screen
+            if (enemy.y > WINDOW_HEIGHT + 100) {
+                enemies.remove(i);
+            }
+        }
+        
+        // Update enemy bullets
+        for (int i = enemyBullets.size() - 1; i >= 0; i--) {
+            EnemyBullet bullet = enemyBullets.get(i);
+            bullet.update();
+            
+            // Remove bullets that are off screen
+            if (bullet.y > WINDOW_HEIGHT + 50) {
+                enemyBullets.remove(i);
+            }
+        }
+        
+        // Check collisions between player bullets and enemies
+        for (int i = bullets.size() - 1; i >= 0; i--) {
+            Bullet bullet = bullets.get(i);
+            for (int j = enemies.size() - 1; j >= 0; j--) {
+                Enemy enemy = enemies.get(j);
+                if (checkCollision(bullet.x, bullet.y, 16, 16, enemy.x, enemy.y, enemy.width, enemy.height)) {
+                    bullets.remove(i);
+                    enemies.remove(j);
+                    killCount++;
+                    break;
+                }
+            }
+        }
+        
         // Spawn new rocks
         spawnTimer++;
         if (spawnTimer > 40) { // Spawn every ~0.6 seconds
             spawnTimer = 0;
             spawnRock();
+        }
+        
+        // Spawn new enemies
+        enemySpawnTimer++;
+        if (enemySpawnTimer > 80) { // Spawn every ~1.3 seconds
+            enemySpawnTimer = 0;
+            spawnEnemy();
+        }
+    }
+    
+    private boolean checkCollision(int x1, int y1, int w1, int h1, int x2, int y2, int w2, int h2) {
+        return x1 < x2 + w2 && x1 + w1 > x2 && y1 < y2 + h2 && y1 + h1 > y2;
+    }
+    
+    private void spawnEnemy() {
+        int pattern = random.nextInt(5);
+        
+        switch(pattern) {
+            case 0: // Single enemy from top
+                enemies.add(new Enemy(random.nextInt(WINDOW_WIDTH - 50), -50, enemySheet, 1));
+                break;
+            case 1: // Two enemies side by side
+                enemies.add(new Enemy(random.nextInt(WINDOW_WIDTH / 2), -50, enemySheet, 1));
+                enemies.add(new Enemy(WINDOW_WIDTH / 2 + random.nextInt(WINDOW_WIDTH / 2 - 50), -50, enemySheet, 1));
+                break;
+            case 2: // Three enemies in a row
+                int startX = random.nextInt(WINDOW_WIDTH / 2);
+                for (int i = 0; i < 3; i++) {
+                    enemies.add(new Enemy(startX + i * 60, -50 - i * 30, enemySheet, 1));
+                }
+                break;
+            case 3: // V formation
+                int centerX = WINDOW_WIDTH / 2;
+                enemies.add(new Enemy(centerX, -50, enemySheet, 1));
+                enemies.add(new Enemy(centerX - 60, -80, enemySheet, 1));
+                enemies.add(new Enemy(centerX + 60, -80, enemySheet, 1));
+                break;
+            case 4: // Diagonal line
+                int diagX = random.nextInt(WINDOW_WIDTH / 2);
+                for (int i = 0; i < 3; i++) {
+                    enemies.add(new Enemy(diagX + i * 50, -50 - i * 40, enemySheet, 2));
+                }
+                break;
         }
     }
     
@@ -136,8 +248,18 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
             rock.draw(g2d);
         }
         
+        // Draw enemies
+        for (Enemy enemy : enemies) {
+            enemy.draw(g2d);
+        }
+        
         // Draw bullets
         for (Bullet bullet : bullets) {
+            bullet.draw(g2d);
+        }
+        
+        // Draw enemy bullets
+        for (EnemyBullet bullet : enemyBullets) {
             bullet.draw(g2d);
         }
         
@@ -147,7 +269,9 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
         // Draw UI
         g2d.setColor(Color.WHITE);
         g2d.drawString("Rocks: " + rocks.size(), 10, 20);
-        g2d.drawString("Use Arrow Keys to Move", 10, 40);
+        g2d.drawString("Kills: " + killCount, 10, 40);
+        g2d.drawString("Use Arrow Keys to Move", 10, 60);
+        g2d.drawString("Space to Shoot", 10, 80);
     }
     
     private void drawBackground(Graphics2D g2d) {
@@ -510,5 +634,130 @@ class Bullet {
             g.setColor(Color.YELLOW);
             g.fillRect(x, y, 8, 12);
         }
+    }
+}
+
+// Enemy class
+class Enemy {
+    int x, y;
+    int width = 64;  // 2x2 grid * 16 * 2 scale
+    int height = 64;
+    int speed;
+    int movePattern;
+    int moveCounter = 0;
+    BufferedImage enemySheet;
+    ArrayList<EnemyPart> parts;
+    
+    public Enemy(int x, int y, BufferedImage sheet, int movePattern) {
+        this.x = x;
+        this.y = y;
+        this.enemySheet = sheet;
+        this.movePattern = movePattern;
+        this.speed = 1 + new Random().nextInt(2);
+        this.parts = new ArrayList<>();
+        createEnemyParts();
+    }
+    
+    private void createEnemyParts() {
+        // Enemy 2x2 grid (scaled 2x)
+        parts.add(new EnemyPart(0, 0, 192, 112, 16, 16));      // 1 top-left
+        parts.add(new EnemyPart(32, 0, 208, 112, 16, 16));     // 2 top-right
+        parts.add(new EnemyPart(0, 32, 192, 128, 16, 16));     // 3 bottom-left
+        parts.add(new EnemyPart(32, 32, 208, 128, 16, 16));    // 4 bottom-right
+    }
+    
+    public void update() {
+        moveCounter++;
+        
+        // Different movement patterns
+        if (movePattern == 1) {
+            // Straight down
+            y += speed;
+        } else if (movePattern == 2) {
+            // Zig-zag
+            y += speed;
+            x += (int)(Math.sin(moveCounter * 0.1) * 3);
+        }
+    }
+    
+    public void shoot(ArrayList<EnemyBullet> bullets, BufferedImage bulletSheet) {
+        // Shoot from center of enemy
+        bullets.add(new EnemyBullet(x + width / 2 - 8, y + height, bulletSheet));
+    }
+    
+    public void draw(Graphics2D g) {
+        if (enemySheet == null) {
+            // Fallback drawing
+            g.setColor(Color.RED);
+            g.fillRect(x, y, width, height);
+            return;
+        }
+        
+        for (EnemyPart part : parts) {
+            try {
+                BufferedImage sprite = enemySheet.getSubimage(
+                    part.srcX, part.srcY, part.srcW, part.srcH
+                );
+                int scaledW = part.srcW * 2;
+                int scaledH = part.srcH * 2;
+                g.drawImage(sprite, x + part.offsetX, y + part.offsetY, scaledW, scaledH, null);
+            } catch (Exception e) {
+                // Fallback if sprite extraction fails
+                g.setColor(Color.RED);
+                g.fillRect(x + part.offsetX, y + part.offsetY, part.srcW * 2, part.srcH * 2);
+            }
+        }
+    }
+}
+
+// Enemy bullet class
+class EnemyBullet {
+    int x, y;
+    int speed = 5;
+    BufferedImage bulletSheet;
+    
+    public EnemyBullet(int x, int y, BufferedImage sheet) {
+        this.x = x;
+        this.y = y;
+        this.bulletSheet = sheet;
+    }
+    
+    public void update() {
+        y += speed; // Move downward
+    }
+    
+    public void draw(Graphics2D g) {
+        if (bulletSheet == null) {
+            // Fallback drawing
+            g.setColor(Color.RED);
+            g.fillRect(x, y, 8, 12);
+            return;
+        }
+        
+        try {
+            // Get enemy bullet sprite at 176,144, 16x16
+            BufferedImage sprite = bulletSheet.getSubimage(176, 144, 16, 16);
+            g.drawImage(sprite, x, y, 16, 16, null);
+        } catch (Exception e) {
+            // Fallback if sprite extraction fails
+            g.setColor(Color.RED);
+            g.fillRect(x, y, 8, 12);
+        }
+    }
+}
+
+// Helper class to store enemy part information
+class EnemyPart {
+    int offsetX, offsetY;
+    int srcX, srcY;
+    int srcW, srcH;
+    
+    public EnemyPart(int offsetX, int offsetY, int srcX, int srcY, int srcW, int srcH) {
+        this.offsetX = offsetX;
+        this.offsetY = offsetY;
+        this.srcX = srcX;
+        this.srcY = srcY;
+        this.srcW = srcW;
+        this.srcH = srcH;
     }
 }
