@@ -30,6 +30,7 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
     private int spawnTimer;
     private int enemySpawnTimer;
     private int killCount;
+    private int autoFireTimer;
     private Clip musicClip;
     public static final int ROCK_SCALE = 2;  // Double the rock size
     
@@ -38,6 +39,7 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
         setBackground(Color.BLACK);
         setFocusable(true);
         addKeyListener(this);
+        setDoubleBuffered(true); // Enable double buffering for smoother rendering
         
         random = new Random();
         rocks = new ArrayList<>();
@@ -48,6 +50,7 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
         spawnTimer = 0;
         enemySpawnTimer = 0;
         killCount = 0;
+        autoFireTimer = 0;
         
         loadImages();
         
@@ -55,7 +58,7 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
         
         playMusic();
         
-        gameTimer = new Timer(16, this); // ~60 FPS
+        gameTimer = new Timer(16, this); // 60 FPS for better performance
         gameTimer.start();
     }
     
@@ -97,6 +100,13 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
         // Update player
         player.update();
         
+        // Auto fire
+        autoFireTimer++;
+        if (autoFireTimer > 10) { // Fire every ~0.16 seconds
+            autoFireTimer = 0;
+            shootBullets();
+        }
+        
         // Update background scroll
         backgroundOffsetY += 1.5;
         if (backgroundOffsetY >= WINDOW_HEIGHT) {
@@ -125,13 +135,18 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
             }
         }
         
+        // Limit bullets to prevent lag
+        while (bullets.size() > 30) {
+            bullets.remove(0);
+        }
+        
         // Update enemies
         for (int i = enemies.size() - 1; i >= 0; i--) {
             Enemy enemy = enemies.get(i);
             enemy.update();
             
-            // Enemy shoots occasionally
-            if (random.nextInt(100) < 2) { // 2% chance per frame
+            // Enemy shoots occasionally (reduced frequency)
+            if (random.nextInt(200) < 2) { // 1% chance per frame (was 2%)
                 enemy.shoot(enemyBullets, bulletSheet);
             }
             
@@ -168,14 +183,14 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
         
         // Spawn new rocks
         spawnTimer++;
-        if (spawnTimer > 40) { // Spawn every ~0.6 seconds
+        if (spawnTimer > 120 && rocks.size() < 10) { // Spawn every ~2 seconds, max 10 rocks
             spawnTimer = 0;
             spawnRock();
         }
         
         // Spawn new enemies
         enemySpawnTimer++;
-        if (enemySpawnTimer > 80) { // Spawn every ~1.3 seconds
+        if (enemySpawnTimer > 120 && enemies.size() < 8) { // Slower spawn, max 8 enemies
             enemySpawnTimer = 0;
             spawnEnemy();
         }
@@ -292,11 +307,6 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
     @Override
     public void keyPressed(KeyEvent e) {
         player.keyPressed(e);
-        
-        // Shoot bullets on space bar
-        if (e.getKeyCode() == KeyEvent.VK_SPACE) {
-            shootBullets();
-        }
     }
     
     @Override
@@ -469,7 +479,7 @@ class Rock {
         this.y = y;
         this.level = level;
         this.asteroidSheet = sheet;
-        this.speed = 2 + new Random().nextInt(3);
+        this.speed = 1 + new Random().nextInt(2); // Slower: 1-2 instead of 2-4
         this.parts = new ArrayList<>();
         
         createRockParts();
