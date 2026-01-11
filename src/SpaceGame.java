@@ -19,6 +19,7 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
     private ArrayList<Bullet> bullets;
     private ArrayList<Enemy> enemies;
     private ArrayList<EnemyBullet> enemyBullets;
+    private ArrayList<Explosion> explosions;
     private Random random;
     private BufferedImage asteroidSheet;
     private BufferedImage backgroundSheet;
@@ -27,6 +28,7 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
     private BufferedImage exhaustSheet;
     private BufferedImage bulletSheet;
     private BufferedImage uiSheet;
+    private BufferedImage explosionSheet;
     private double backgroundOffsetY;
     private int spawnTimer;
     private int enemySpawnTimer;
@@ -50,6 +52,7 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
         bullets = new ArrayList<>();
         enemies = new ArrayList<>();
         enemyBullets = new ArrayList<>();
+        explosions = new ArrayList<>();
         backgroundOffsetY = 0;
         spawnTimer = 0;
         enemySpawnTimer = 0;
@@ -78,6 +81,7 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
             exhaustSheet = ImageIO.read(new File("../Assets/Exhaust-0001.png"));
             bulletSheet = ImageIO.read(new File("../Assets/Bullets-0001.png"));
             uiSheet = ImageIO.read(new File("../Assets/UI_sprites-0001.png"));
+            explosionSheet = ImageIO.read(new File("../Assets/Explosion-0001.png"));
         } catch (Exception e) {
             System.err.println("Error loading images: " + e.getMessage());
             e.printStackTrace();
@@ -157,6 +161,15 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
             bullets.remove(0);
         }
         
+        // Update explosions
+        for (int i = explosions.size() - 1; i >= 0; i--) {
+            Explosion explosion = explosions.get(i);
+            explosion.update();
+            if (explosion.isFinished()) {
+                explosions.remove(i);
+            }
+        }
+        
         // Update enemies
         for (int i = enemies.size() - 1; i >= 0; i--) {
             Enemy enemy = enemies.get(i);
@@ -181,6 +194,24 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
             // Remove bullets that are off screen
             if (bullet.y > WINDOW_HEIGHT + 50) {
                 enemyBullets.remove(i);
+            }
+        }
+        
+        // Check collisions between player bullets and rocks
+        for (int i = bullets.size() - 1; i >= 0; i--) {
+            if (i >= bullets.size()) continue;
+            Bullet bullet = bullets.get(i);
+            for (int j = rocks.size() - 1; j >= 0; j--) {
+                Rock rock = rocks.get(j);
+                if (checkCollision(bullet.x, bullet.y, 16, 16, rock.x, rock.y, rock.width, rock.height)) {
+                    bullets.remove(i);
+                    rock.health--;
+                    if (rock.health <= 0) {
+                        explosions.add(new Explosion(rock.x, rock.y, rock.level, explosionSheet));
+                        rocks.remove(j);
+                    }
+                    break;
+                }
             }
         }
         
@@ -318,6 +349,11 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
         // Draw rocks
         for (Rock rock : rocks) {
             rock.draw(g2d);
+        }
+        
+        // Draw explosions
+        for (Explosion explosion : explosions) {
+            explosion.draw(g2d);
         }
         
         // Draw enemies
@@ -566,6 +602,7 @@ class Rock {
     int level; // 1 = small, 2 = medium, 3 = big
     int speed;
     int width, height;
+    int health;
     BufferedImage asteroidSheet;
     ArrayList<RockPart> parts;
     
@@ -576,6 +613,15 @@ class Rock {
         this.asteroidSheet = sheet;
         this.speed = 1 + new Random().nextInt(2); // Slower: 1-2 instead of 2-4
         this.parts = new ArrayList<>();
+        
+        // Set health based on rock size
+        if (level == 1) {
+            this.health = 3; // Small rock
+        } else if (level == 2) {
+            this.health = 4; // Medium rock
+        } else {
+            this.health = 5; // Big rock
+        }
         
         createRockParts();
         calculateDimensions();
@@ -858,6 +904,101 @@ class EnemyPart {
     int srcW, srcH;
     
     public EnemyPart(int offsetX, int offsetY, int srcX, int srcY, int srcW, int srcH) {
+        this.offsetX = offsetX;
+        this.offsetY = offsetY;
+        this.srcX = srcX;
+        this.srcY = srcY;
+        this.srcW = srcW;
+        this.srcH = srcH;
+    }
+}
+
+// Explosion class
+class Explosion {
+    int x, y;
+    int level;
+    int frame;
+    int maxFrames;
+    BufferedImage explosionSheet;
+    ArrayList<ExplosionPart> parts;
+    
+    public Explosion(int x, int y, int level, BufferedImage sheet) {
+        this.x = x;
+        this.y = y;
+        this.level = level;
+        this.explosionSheet = sheet;
+        this.frame = 0;
+        this.maxFrames = 10; // Animation lasts 10 frames
+        this.parts = new ArrayList<>();
+        createExplosionParts();
+    }
+    
+    private void createExplosionParts() {
+        if (level == 1) {
+            // Small rock explosion: 16,48, 16x16
+            parts.add(new ExplosionPart(0, 0, 16, 48, 16, 16));
+        } else if (level == 2) {
+            // Medium rock explosion: 48,48, 16x16
+            parts.add(new ExplosionPart(0, 0, 48, 48, 16, 16));
+        } else if (level == 3) {
+            // Big rock explosion: 4x4 grid
+            for (int row = 0; row < 4; row++) {
+                for (int col = 0; col < 4; col++) {
+                    int srcX = 64 + (col * 16);
+                    int srcY = 16 + (row * 16);
+                    int offsetX = col * 16 * SpaceGame.ROCK_SCALE;
+                    int offsetY = row * 16 * SpaceGame.ROCK_SCALE;
+                    parts.add(new ExplosionPart(offsetX, offsetY, srcX, srcY, 16, 16));
+                }
+            }
+        }
+    }
+    
+    public void update() {
+        frame++;
+    }
+    
+    public boolean isFinished() {
+        return frame >= maxFrames;
+    }
+    
+    public void draw(Graphics2D g) {
+        if (explosionSheet == null) return;
+        
+        // Fade effect based on frame
+        float alpha = 1.0f - (frame / (float)maxFrames);
+        g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha));
+        
+        for (ExplosionPart part : parts) {
+            try {
+                BufferedImage sprite = explosionSheet.getSubimage(
+                    part.srcX, part.srcY, part.srcW, part.srcH
+                );
+                
+                if (level == 1) {
+                    g.drawImage(sprite, x + part.offsetX, y + part.offsetY, 16 * SpaceGame.ROCK_SCALE, 16 * SpaceGame.ROCK_SCALE, null);
+                } else if (level == 2) {
+                    g.drawImage(sprite, x + part.offsetX, y + part.offsetY, 32 * SpaceGame.ROCK_SCALE, 32 * SpaceGame.ROCK_SCALE, null);
+                } else {
+                    g.drawImage(sprite, x + part.offsetX, y + part.offsetY, 16 * SpaceGame.ROCK_SCALE, 16 * SpaceGame.ROCK_SCALE, null);
+                }
+            } catch (Exception e) {
+                // Skip if sprite extraction fails
+            }
+        }
+        
+        // Reset composite
+        g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 1.0f));
+    }
+}
+
+// Helper class for explosion parts
+class ExplosionPart {
+    int offsetX, offsetY;
+    int srcX, srcY;
+    int srcW, srcH;
+    
+    public ExplosionPart(int offsetX, int offsetY, int srcX, int srcY, int srcW, int srcH) {
         this.offsetX = offsetX;
         this.offsetY = offsetY;
         this.srcX = srcX;
