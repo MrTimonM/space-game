@@ -26,11 +26,15 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
     private BufferedImage enemySheet;
     private BufferedImage exhaustSheet;
     private BufferedImage bulletSheet;
+    private BufferedImage uiSheet;
     private double backgroundOffsetY;
     private int spawnTimer;
     private int enemySpawnTimer;
     private int killCount;
     private int autoFireTimer;
+    private int lives;
+    private int invincibilityTimer;
+    private boolean gameOver;
     private Clip musicClip;
     public static final int ROCK_SCALE = 2;  // Double the rock size
     
@@ -51,6 +55,9 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
         enemySpawnTimer = 0;
         killCount = 0;
         autoFireTimer = 0;
+        lives = 6; // 3 hearts × 2 lives each
+        invincibilityTimer = 0;
+        gameOver = false;
         
         loadImages();
         
@@ -70,6 +77,7 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
             enemySheet = ImageIO.read(new File("../Assets/SpaceShips_Enemy-0001.png"));
             exhaustSheet = ImageIO.read(new File("../Assets/Exhaust-0001.png"));
             bulletSheet = ImageIO.read(new File("../Assets/Bullets-0001.png"));
+            uiSheet = ImageIO.read(new File("../Assets/UI_sprites-0001.png"));
         } catch (Exception e) {
             System.err.println("Error loading images: " + e.getMessage());
             e.printStackTrace();
@@ -97,6 +105,15 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
     }
     
     private void update() {
+        if (gameOver) {
+            return; // Don't update if game is over
+        }
+        
+        // Update invincibility timer
+        if (invincibilityTimer > 0) {
+            invincibilityTimer--;
+        }
+        
         // Update player
         player.update();
         
@@ -181,6 +198,38 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
             }
         }
         
+        // Check collisions between player and enemies
+        if (invincibilityTimer == 0) {
+            for (int i = enemies.size() - 1; i >= 0; i--) {
+                Enemy enemy = enemies.get(i);
+                if (checkCollision(player.x, player.y, player.width, player.height, enemy.x, enemy.y, enemy.width, enemy.height)) {
+                    enemies.remove(i);
+                    loseLife();
+                    break;
+                }
+            }
+            
+            // Check collisions between player and rocks
+            for (int i = rocks.size() - 1; i >= 0; i--) {
+                Rock rock = rocks.get(i);
+                if (checkCollision(player.x, player.y, player.width, player.height, rock.x, rock.y, rock.width, rock.height)) {
+                    rocks.remove(i);
+                    loseLife();
+                    break;
+                }
+            }
+            
+            // Check collisions between player and enemy bullets
+            for (int i = enemyBullets.size() - 1; i >= 0; i--) {
+                EnemyBullet bullet = enemyBullets.get(i);
+                if (checkCollision(player.x, player.y, player.width, player.height, bullet.x, bullet.y, 16, 16)) {
+                    enemyBullets.remove(i);
+                    loseLife();
+                    break;
+                }
+            }
+        }
+        
         // Spawn new rocks
         spawnTimer++;
         if (spawnTimer > 120 && rocks.size() < 10) { // Spawn every ~2 seconds, max 10 rocks
@@ -198,6 +247,14 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
     
     private boolean checkCollision(int x1, int y1, int w1, int h1, int x2, int y2, int w2, int h2) {
         return x1 < x2 + w2 && x1 + w1 > x2 && y1 < y2 + h2 && y1 + h1 > y2;
+    }
+    
+    private void loseLife() {
+        lives--;
+        invincibilityTimer = 60; // 1 second of invincibility
+        if (lives <= 0) {
+            gameOver = true;
+        }
     }
     
     private void spawnEnemy() {
@@ -281,12 +338,18 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
         // Draw player
         player.draw(g2d);
         
-        // Draw UI
-        g2d.setColor(Color.WHITE);
-        g2d.drawString("Rocks: " + rocks.size(), 10, 20);
-        g2d.drawString("Kills: " + killCount, 10, 40);
-        g2d.drawString("Use Arrow Keys to Move", 10, 60);
-        g2d.drawString("Space to Shoot", 10, 80);
+        // Draw lives
+        drawLives(g2d);
+        
+        // Draw game over message
+        if (gameOver) {
+            g2d.setFont(new Font("Arial", Font.BOLD, 48));
+            g2d.setColor(Color.RED);
+            g2d.drawString("GAME OVER", WINDOW_WIDTH / 2 - 150, WINDOW_HEIGHT / 2);
+            g2d.setFont(new Font("Arial", Font.PLAIN, 24));
+            g2d.setColor(Color.WHITE);
+            g2d.drawString("Final Kills: " + killCount, WINDOW_WIDTH / 2 - 80, WINDOW_HEIGHT / 2 + 50);
+        }
     }
     
     private void drawBackground(Graphics2D g2d) {
@@ -302,6 +365,38 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
         
         g2d.drawImage(backgroundSheet, 0, y1, bgWidth, bgHeight, null);
         g2d.drawImage(backgroundSheet, 0, y2, bgWidth, bgHeight, null);
+    }
+    
+    private void drawLives(Graphics2D g2d) {
+        if (uiSheet == null) return;
+        
+        int heartSize = 32; // Double size from 16 to 32
+        int startX = 10; // Top-left corner
+        int startY = 10;
+        
+        // Calculate how many hearts to show
+        int fullHearts = lives / 2;  // Number of red hearts
+        int hasPartialHeart = lives % 2; // 1 if odd number of lives, 0 if even
+        int totalHeartsToShow = fullHearts + hasPartialHeart;
+        
+        // Draw only the hearts that should be visible
+        for (int i = 0; i < totalHeartsToShow; i++) {
+            try {
+                BufferedImage heart;
+                if (i < fullHearts) {
+                    // Full heart at 0,80
+                    heart = uiSheet.getSubimage(0, 80, 16, 16);
+                } else {
+                    // Gray heart at 16,80 (for the partial heart)
+                    heart = uiSheet.getSubimage(16, 80, 16, 16);
+                }
+                g2d.drawImage(heart, startX + (i * 36), startY, heartSize, heartSize, null);
+            } catch (Exception e) {
+                // Fallback - draw colored rectangles
+                g2d.setColor(i < fullHearts ? Color.RED : Color.DARK_GRAY);
+                g2d.fillRect(startX + (i * 36), startY, heartSize, heartSize);
+            }
+        }
     }
     
     @Override
