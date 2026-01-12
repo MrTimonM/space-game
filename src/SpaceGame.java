@@ -20,6 +20,9 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
     private ArrayList<Enemy> enemies;
     private ArrayList<EnemyBullet> enemyBullets;
     private ArrayList<Explosion> explosions;
+    private Boss boss;
+    private ArrayList<BossBullet> bossBullets;
+    private ArrayList<SubEnemy> subEnemies;
     private Random random;
     private BufferedImage asteroidSheet;
     private BufferedImage backgroundSheet;
@@ -29,6 +32,8 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
     private BufferedImage bulletSheet;
     private BufferedImage uiSheet;
     private BufferedImage explosionSheet;
+    private BufferedImage allSheet;
+    private ArrayList<HealthPowerUp> healthPowerUps;
     private double backgroundOffsetY;
     private int spawnTimer;
     private int enemySpawnTimer;
@@ -37,7 +42,12 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
     private int lives;
     private int invincibilityTimer;
     private boolean gameOver;
+    private boolean gameWon;
+    private int gameTime;
+    private boolean bossDefeated;
+    private int bossSpawnDelay;
     private Clip musicClip;
+    private Clip bossMusicClip;
     public static final int ROCK_SCALE = 2;  // Double the rock size
     
     public SpaceGame() {
@@ -53,12 +63,20 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
         enemies = new ArrayList<>();
         enemyBullets = new ArrayList<>();
         explosions = new ArrayList<>();
+        bossBullets = new ArrayList<>();
+        subEnemies = new ArrayList<>();
+        healthPowerUps = new ArrayList<>();
+        boss = null;
+        bossDefeated = false;
+        gameWon = false;
+        gameTime = 0;
+        bossSpawnDelay = 0;
         backgroundOffsetY = 0;
         spawnTimer = 0;
         enemySpawnTimer = 0;
         killCount = 0;
         autoFireTimer = 0;
-        lives = 6; // 3 hearts × 2 lives each
+        lives = 10; // 5 hearts × 2 lives each
         invincibilityTimer = 0;
         gameOver = false;
         
@@ -68,7 +86,7 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
         
         playMusic();
         
-        gameTimer = new Timer(16, this); // 60 FPS for better performance
+        gameTimer = new Timer(20, this); // 50 FPS for better performance and slower gameplay
         gameTimer.start();
     }
     
@@ -82,6 +100,7 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
             bulletSheet = ImageIO.read(new File("../Assets/Bullets-0001.png"));
             uiSheet = ImageIO.read(new File("../Assets/UI_sprites-0001.png"));
             explosionSheet = ImageIO.read(new File("../Assets/Explosion-0001.png"));
+            allSheet = ImageIO.read(new File("../Assets/All.png"));
         } catch (Exception e) {
             System.err.println("Error loading images: " + e.getMessage());
             e.printStackTrace();
@@ -90,15 +109,52 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
     
     private void playMusic() {
         try {
-            File musicFile = new File("../Assets/music.wav");
+            // Load theme music
+            File musicFile = new File("../Assets/theme.wav");
             AudioInputStream audioStream = AudioSystem.getAudioInputStream(musicFile);
             musicClip = AudioSystem.getClip();
             musicClip.open(audioStream);
             musicClip.loop(Clip.LOOP_CONTINUOUSLY);
             musicClip.start();
+            
+            // Load boss music (will be played when boss appears)
+            File bossMusicFile = new File("../Assets/boss music.wav");
+            AudioInputStream bossAudioStream = AudioSystem.getAudioInputStream(bossMusicFile);
+            bossMusicClip = AudioSystem.getClip();
+            bossMusicClip.open(bossAudioStream);
         } catch (Exception e) {
             System.err.println("Error loading music: " + e.getMessage());
             e.printStackTrace();
+        }
+    }
+    
+    private void switchToBossMusic() {
+        try {
+            if (musicClip != null && musicClip.isRunning()) {
+                musicClip.stop();
+            }
+            if (bossMusicClip != null) {
+                bossMusicClip.setFramePosition(0);
+                bossMusicClip.loop(Clip.LOOP_CONTINUOUSLY);
+                bossMusicClip.start();
+            }
+        } catch (Exception e) {
+            System.err.println("Error switching to boss music: " + e.getMessage());
+        }
+    }
+    
+    private void switchToThemeMusic() {
+        try {
+            if (bossMusicClip != null && bossMusicClip.isRunning()) {
+                bossMusicClip.stop();
+            }
+            if (musicClip != null) {
+                musicClip.setFramePosition(0);
+                musicClip.loop(Clip.LOOP_CONTINUOUSLY);
+                musicClip.start();
+            }
+        } catch (Exception e) {
+            System.err.println("Error switching to theme music: " + e.getMessage());
         }
     }
     
@@ -109,8 +165,26 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
     }
     
     private void update() {
-        if (gameOver) {
-            return; // Don't update if game is over
+        if (gameOver || gameWon) {
+            return; // Don't update if game is over or won
+        }
+        
+        // Update game time (50 FPS, so 50 frames = 1 second)
+        gameTime++;
+        
+        // Trigger boss spawn sequence at 30 seconds (30 * 50 = 1500 frames)
+        if (gameTime == 1500 && boss == null && !bossDefeated) {
+            // Start clearing enemies and rocks with explosions
+            clearEnemiesForBoss();
+            bossSpawnDelay = 50; // 1 second delay before boss appears
+        }
+        
+        // Spawn boss after delay
+        if (bossSpawnDelay > 0) {
+            bossSpawnDelay--;
+            if (bossSpawnDelay == 0) {
+                spawnBoss();
+            }
         }
         
         // Update invincibility timer
@@ -123,7 +197,7 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
         
         // Auto fire
         autoFireTimer++;
-        if (autoFireTimer > 10) { // Fire every ~0.16 seconds
+        if (autoFireTimer > 30) { // Fire every ~0.6 seconds
             autoFireTimer = 0;
             shootBullets();
         }
@@ -170,19 +244,80 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
             }
         }
         
-        // Update enemies
-        for (int i = enemies.size() - 1; i >= 0; i--) {
-            Enemy enemy = enemies.get(i);
-            enemy.update();
+        // Update boss if active
+        if (boss != null) {
+            boss.update();
             
-            // Enemy shoots occasionally (reduced frequency)
-            if (random.nextInt(200) < 2) { // 1% chance per frame (was 2%)
-                enemy.shoot(enemyBullets, bulletSheet);
+            // Boss shoots bullets frequently (increased rate)
+            if (random.nextInt(30) < 1 && bossBullets.size() < 30) { // Fire more often, limit to 30 boss bullets
+                boss.shoot(bossBullets, bulletSheet);
             }
             
-            // Remove enemies that are off screen
-            if (enemy.y > WINDOW_HEIGHT + 100) {
-                enemies.remove(i);
+            // Boss throws sub-enemies occasionally
+            if (random.nextInt(240) < 1 && subEnemies.size() < 5) { // Less frequent, max 5 sub-enemies
+                boss.throwSubEnemy(subEnemies, enemySheet);
+            }
+        }
+        
+        // Update boss bullets
+        for (int i = bossBullets.size() - 1; i >= 0; i--) {
+            BossBullet bullet = bossBullets.get(i);
+            bullet.update();
+            
+            // Remove bullets that are off screen
+            if (bullet.y > WINDOW_HEIGHT + 50) {
+                bossBullets.remove(i);
+            }
+        }
+        
+        // Limit boss bullets to prevent lag
+        while (bossBullets.size() > 35) {
+            bossBullets.remove(0);
+        }
+        
+        // Update sub-enemies
+        for (int i = subEnemies.size() - 1; i >= 0; i--) {
+            SubEnemy subEnemy = subEnemies.get(i);
+            subEnemy.update();
+            
+            // Remove sub-enemies that are off screen
+            if (subEnemy.y > WINDOW_HEIGHT + 100) {
+                subEnemies.remove(i);
+            }
+        }
+        
+        // Update health power-ups
+        for (int i = healthPowerUps.size() - 1; i >= 0; i--) {
+            HealthPowerUp powerUp = healthPowerUps.get(i);
+            powerUp.update();
+            
+            // Remove power-ups that are off screen
+            if (powerUp.y > WINDOW_HEIGHT + 50) {
+                healthPowerUps.remove(i);
+            }
+        }
+        
+        // Spawn health power-ups randomly (only when boss is not active)
+        if (boss == null && random.nextInt(1200) < 1) { // Much rarer spawn
+            int x = random.nextInt(WINDOW_WIDTH - 50) + 25;
+            healthPowerUps.add(new HealthPowerUp(x, -30, allSheet));
+        }
+        
+        // Update enemies (only if boss is not present)
+        if (boss == null) {
+            for (int i = enemies.size() - 1; i >= 0; i--) {
+                Enemy enemy = enemies.get(i);
+                enemy.update();
+                
+                // Enemy shoots occasionally (reduced frequency)
+                if (random.nextInt(200) < 2) { // 1% chance per frame (was 2%)
+                    enemy.shoot(enemyBullets, bulletSheet);
+                }
+                
+                // Remove enemies that are off screen
+                if (enemy.y > WINDOW_HEIGHT + 100) {
+                    enemies.remove(i);
+                }
             }
         }
         
@@ -229,8 +364,61 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
             }
         }
         
+        // Check collisions between player bullets and boss
+        if (boss != null) {
+            for (int i = bullets.size() - 1; i >= 0; i--) {
+                if (i >= bullets.size()) continue;
+                Bullet bullet = bullets.get(i);
+                if (checkCollision(bullet.x, bullet.y, 16, 16, boss.x, boss.y, boss.width, boss.height)) {
+                    bullets.remove(i);
+                    boss.health--;
+                    if (boss.health <= 0) {
+                        // Boss defeated!
+                        explosions.add(new BossExplosion(boss.x, boss.y, explosionSheet));
+                        boss = null;
+                        bossDefeated = true;
+                        gameWon = true;
+                        // Switch back to theme music
+                        switchToThemeMusic();
+                    }
+                }
+            }
+        }
+        
+        // Check collisions between player bullets and sub-enemies
+        for (int i = bullets.size() - 1; i >= 0; i--) {
+            if (i >= bullets.size()) continue;
+            Bullet bullet = bullets.get(i);
+            for (int j = subEnemies.size() - 1; j >= 0; j--) {
+                SubEnemy subEnemy = subEnemies.get(j);
+                if (checkCollision(bullet.x, bullet.y, 16, 16, subEnemy.x, subEnemy.y, subEnemy.width, subEnemy.height)) {
+                    bullets.remove(i);
+                    subEnemies.remove(j);
+                    killCount++;
+                    break;
+                }
+            }
+        }
+        
         // Check collisions between player and enemies
         if (invincibilityTimer == 0) {
+            // Check collision with boss
+            if (boss != null) {
+                if (checkCollision(player.x, player.y, player.width, player.height, boss.x, boss.y, boss.width, boss.height)) {
+                    loseLife();
+                }
+            }
+            
+            // Check collision with sub-enemies
+            for (int i = subEnemies.size() - 1; i >= 0; i--) {
+                SubEnemy subEnemy = subEnemies.get(i);
+                if (checkCollision(player.x, player.y, player.width, player.height, subEnemy.x, subEnemy.y, subEnemy.width, subEnemy.height)) {
+                    subEnemies.remove(i);
+                    loseLife();
+                    break;
+                }
+            }
+            
             for (int i = enemies.size() - 1; i >= 0; i--) {
                 Enemy enemy = enemies.get(i);
                 if (checkCollision(player.x, player.y, player.width, player.height, enemy.x, enemy.y, enemy.width, enemy.height)) {
@@ -259,20 +447,47 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
                     break;
                 }
             }
+            
+            // Check collisions between player and boss bullets
+            for (int i = bossBullets.size() - 1; i >= 0; i--) {
+                BossBullet bullet = bossBullets.get(i);
+                if (checkCollision(player.x, player.y, player.width, player.height, bullet.x, bullet.y, 16, 16)) {
+                    bossBullets.remove(i);
+                    loseLife();
+                    break;
+                }
+            }
+            
+            // Check collisions between player and health power-ups
+            for (int i = healthPowerUps.size() - 1; i >= 0; i--) {
+                HealthPowerUp powerUp = healthPowerUps.get(i);
+                if (checkCollision(player.x, player.y, player.width, player.height, powerUp.x, powerUp.y, 32, 32)) {
+                    healthPowerUps.remove(i);
+                    // Add life, max 10 (5 hearts)
+                    if (lives < 10) {
+                        lives++;
+                    }
+                    break;
+                }
+            }
         }
         
-        // Spawn new rocks
-        spawnTimer++;
-        if (spawnTimer > 120 && rocks.size() < 10) { // Spawn every ~2 seconds, max 10 rocks
-            spawnTimer = 0;
-            spawnRock();
+        // Spawn new rocks (not when boss is active or spawning)
+        if (boss == null && bossSpawnDelay == 0) {
+            spawnTimer++;
+            if (spawnTimer > 120 && rocks.size() < 10) { // Spawn every ~2 seconds, max 10 rocks
+                spawnTimer = 0;
+                spawnRock();
+            }
         }
         
-        // Spawn new enemies
-        enemySpawnTimer++;
-        if (enemySpawnTimer > 120 && enemies.size() < 8) { // Slower spawn, max 8 enemies
-            enemySpawnTimer = 0;
-            spawnEnemy();
+        // Spawn new enemies (not when boss is active or spawning)
+        if (boss == null && bossSpawnDelay == 0) {
+            enemySpawnTimer++;
+            if (enemySpawnTimer > 120 && enemies.size() < 8) { // Slower spawn, max 8 enemies
+                enemySpawnTimer = 0;
+                spawnEnemy();
+            }
         }
     }
     
@@ -285,6 +500,8 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
         invincibilityTimer = 60; // 1 second of invincibility
         if (lives <= 0) {
             gameOver = true;
+            // Switch to theme music on game over
+            switchToThemeMusic();
         }
     }
     
@@ -318,6 +535,32 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
                 }
                 break;
         }
+    }
+    
+    private void clearEnemiesForBoss() {
+        // Create explosions for all existing enemies
+        for (Enemy enemy : enemies) {
+            explosions.add(new Explosion(enemy.x, enemy.y, 1, explosionSheet));
+        }
+        enemies.clear();
+        
+        // Create explosions for all existing rocks
+        for (Rock rock : rocks) {
+            explosions.add(new Explosion(rock.x, rock.y, rock.level, explosionSheet));
+        }
+        rocks.clear();
+        
+        // Clear bullets
+        enemyBullets.clear();
+    }
+    
+    private void spawnBoss() {
+        // Spawn boss in the center top
+        boss = new Boss(WINDOW_WIDTH / 2 - 72, -150, enemySheet);
+        boss.setAllSheet(allSheet);
+        
+        // Switch to boss music
+        switchToBossMusic();
     }
     
     private void spawnRock() {
@@ -356,6 +599,16 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
             explosion.draw(g2d);
         }
         
+        // Draw boss
+        if (boss != null) {
+            boss.draw(g2d);
+        }
+        
+        // Draw sub-enemies
+        for (SubEnemy subEnemy : subEnemies) {
+            subEnemy.draw(g2d);
+        }
+        
         // Draw enemies
         for (Enemy enemy : enemies) {
             enemy.draw(g2d);
@@ -369,6 +622,16 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
         // Draw enemy bullets
         for (EnemyBullet bullet : enemyBullets) {
             bullet.draw(g2d);
+        }
+        
+        // Draw boss bullets
+        for (BossBullet bullet : bossBullets) {
+            bullet.draw(g2d);
+        }
+        
+        // Draw health power-ups
+        for (HealthPowerUp powerUp : healthPowerUps) {
+            powerUp.draw(g2d);
         }
         
         // Draw player
@@ -385,6 +648,18 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
             g2d.setFont(new Font("Arial", Font.PLAIN, 24));
             g2d.setColor(Color.WHITE);
             g2d.drawString("Final Kills: " + killCount, WINDOW_WIDTH / 2 - 80, WINDOW_HEIGHT / 2 + 50);
+            g2d.drawString("Press R to Restart", WINDOW_WIDTH / 2 - 100, WINDOW_HEIGHT / 2 + 90);
+        }
+        
+        // Draw win message
+        if (gameWon) {
+            g2d.setFont(new Font("Arial", Font.BOLD, 48));
+            g2d.setColor(Color.GREEN);
+            g2d.drawString("YOU WIN!", WINDOW_WIDTH / 2 - 130, WINDOW_HEIGHT / 2);
+            g2d.setFont(new Font("Arial", Font.PLAIN, 24));
+            g2d.setColor(Color.WHITE);
+            g2d.drawString("Boss Defeated!", WINDOW_WIDTH / 2 - 80, WINDOW_HEIGHT / 2 + 50);
+            g2d.drawString("Press R to Play Again", WINDOW_WIDTH / 2 - 110, WINDOW_HEIGHT / 2 + 90);
         }
     }
     
@@ -438,6 +713,41 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
     @Override
     public void keyPressed(KeyEvent e) {
         player.keyPressed(e);
+        
+        // Restart game on R key
+        if (e.getKeyCode() == KeyEvent.VK_R && (gameOver || gameWon)) {
+            restartGame();
+        }
+    }
+    
+    private void restartGame() {
+        // Reset all game state
+        rocks.clear();
+        bullets.clear();
+        enemies.clear();
+        enemyBullets.clear();
+        explosions.clear();
+        bossBullets.clear();
+        subEnemies.clear();
+        healthPowerUps.clear();
+        boss = null;
+        bossDefeated = false;
+        gameWon = false;
+        gameOver = false;
+        gameTime = 0;
+        killCount = 0;
+        lives = 10;
+        invincibilityTimer = 0;
+        spawnTimer = 0;
+        enemySpawnTimer = 0;
+        bossSpawnDelay = 0;
+        
+        // Reset player position
+        player.x = WINDOW_WIDTH / 2 - 32;
+        player.y = WINDOW_HEIGHT - 100;
+        
+        // Make sure theme music is playing
+        switchToThemeMusic();
     }
     
     @Override
@@ -933,7 +1243,7 @@ class Explosion {
         createExplosionParts();
     }
     
-    private void createExplosionParts() {
+    protected void createExplosionParts() {
         if (level == 1) {
             // Small rock explosion: 16,48, 16x16
             parts.add(new ExplosionPart(0, 0, 16, 48, 16, 16));
@@ -1005,5 +1315,421 @@ class ExplosionPart {
         this.srcY = srcY;
         this.srcW = srcW;
         this.srcH = srcH;
+    }
+}
+
+// Boss class
+class Boss {
+    int x, y;
+    int width = 144;  // 3 tiles * 16 * 3 scale
+    int height = 192; // 4 tiles * 16 * 3 scale
+    int health = 150;
+    int speed = 2;
+    int moveCounter = 0;
+    BufferedImage enemySheet;
+    BufferedImage allSheet;
+    ArrayList<BossPart> parts;
+    Random random;
+    
+    public Boss(int x, int y, BufferedImage sheet) {
+        this.x = x;
+        this.y = y;
+        this.enemySheet = sheet;
+        this.parts = new ArrayList<>();
+        this.random = new Random();
+        createBossParts();
+    }
+    
+    public void setAllSheet(BufferedImage allSheet) {
+        this.allSheet = allSheet;
+    }
+    
+    private void createBossParts() {
+        // Boss 3x4 grid (12 parts) - scaled 3x
+        // Row 1
+        parts.add(new BossPart(0, 0, 32, 0, 16, 16));      // 1
+        parts.add(new BossPart(48, 0, 48, 0, 16, 16));     // 2
+        parts.add(new BossPart(96, 0, 64, 0, 16, 16));     // 3
+        
+        // Row 2
+        parts.add(new BossPart(0, 48, 32, 16, 16, 16));    // 4
+        parts.add(new BossPart(48, 48, 48, 16, 16, 16));   // 5
+        parts.add(new BossPart(96, 48, 64, 16, 16, 16));   // 6
+        
+        // Row 3
+        parts.add(new BossPart(0, 96, 32, 32, 16, 16));    // 7
+        parts.add(new BossPart(48, 96, 48, 32, 16, 16));   // 8
+        parts.add(new BossPart(96, 96, 64, 32, 16, 16));   // 9
+        
+        // Row 4 (bullet firing positions)
+        parts.add(new BossPart(0, 144, 32, 48, 16, 16));   // 10
+        parts.add(new BossPart(48, 144, 48, 48, 16, 16));  // 11
+        parts.add(new BossPart(96, 144, 64, 48, 16, 16));  // 12
+    }
+    
+    public void update() {
+        moveCounter++;
+        
+        // Move down slowly until reaching top quarter of screen
+        if (y < 50) {
+            y += speed;
+        } else {
+            // Horizontal movement pattern
+            x += (int)(Math.sin(moveCounter * 0.02) * 3);
+            
+            // Keep boss in bounds
+            if (x < 0) x = 0;
+            if (x > 800 - width) x = 800 - width;
+        }
+    }
+    
+    public void shoot(ArrayList<BossBullet> bullets, BufferedImage bulletSheet) {
+        // Fire from positions 10, 11, 12 (bottom row)
+        // Position 10 - left
+        bullets.add(new BossBullet(x + 24, y + 144 + 48, bulletSheet));
+        // Position 11 - center
+        bullets.add(new BossBullet(x + 72, y + 144 + 48, bulletSheet));
+        // Position 12 - right
+        bullets.add(new BossBullet(x + 120, y + 144 + 48, bulletSheet));
+    }
+    
+    public void throwSubEnemy(ArrayList<SubEnemy> subEnemies, BufferedImage enemySheet) {
+        // Spawn sub-enemy from boss position
+        subEnemies.add(new SubEnemy(x + width / 2 - 32, y + height, enemySheet));
+    }
+    
+    public void draw(Graphics2D g) {
+        if (enemySheet == null) {
+            // Fallback drawing
+            g.setColor(Color.MAGENTA);
+            g.fillRect(x, y, width, height);
+            return;
+        }
+        
+        for (BossPart part : parts) {
+            try {
+                BufferedImage sprite = enemySheet.getSubimage(
+                    part.srcX, part.srcY, part.srcW, part.srcH
+                );
+                int scaledW = part.srcW * 3;
+                int scaledH = part.srcH * 3;
+                g.drawImage(sprite, x + part.offsetX, y + part.offsetY, scaledW, scaledH, null);
+            } catch (Exception e) {
+                // Fallback if sprite extraction fails
+                g.setColor(Color.MAGENTA);
+                g.fillRect(x + part.offsetX, y + part.offsetY, part.srcW * 3, part.srcH * 3);
+            }
+        }
+        
+        // Draw sprite-based health bar
+        drawHealthBar(g);
+    }
+    
+    private void drawHealthBar(Graphics2D g) {
+        if (allSheet == null) {
+            // Fallback to simple health bar
+            g.setColor(Color.RED);
+            g.fillRect(x, y - 20, width, 10);
+            g.setColor(Color.GREEN);
+            int healthWidth = (int)((health / 150.0) * width);
+            g.fillRect(x, y - 20, healthWidth, 10);
+            return;
+        }
+        
+        // Determine which health bar state to show (1-6)
+        // State 1: 150-126 health (full)
+        // State 2: 125-101 health
+        // State 3: 100-76 health
+        // State 4: 75-51 health
+        // State 5: 50-26 health
+        // State 6: 25-1 health (almost dead)
+        int state;
+        if (health > 125) {
+            state = 1;
+        } else if (health > 100) {
+            state = 2;
+        } else if (health > 75) {
+            state = 3;
+        } else if (health > 50) {
+            state = 4;
+        } else if (health > 25) {
+            state = 5;
+        } else {
+            state = 6;
+        }
+        
+        // Get the starting X position for the health bar sprites
+        int srcX;
+        switch (state) {
+            case 1: srcX = 624; break; // Full health
+            case 2: srcX = 672; break;
+            case 3: srcX = 720; break;
+            case 4: srcX = 768; break;
+            case 5: srcX = 816; break;
+            case 6: srcX = 864; break;
+            default: srcX = 624; break;
+        }
+        
+        try {
+            // Draw 3-part health bar centered above the boss
+            int barY = y - 40;
+            int centerX = x + width / 2;
+            int barWidth = 48 * 2; // 3 sprites * 16 * 2 scale = 96 total width
+            int startX = centerX - barWidth / 2;
+            
+            // Left part
+            BufferedImage leftSprite = allSheet.getSubimage(srcX, 0, 16, 16);
+            g.drawImage(leftSprite, startX, barY, 32, 32, null);
+            
+            // Middle part
+            BufferedImage midSprite = allSheet.getSubimage(srcX + 16, 0, 16, 16);
+            g.drawImage(midSprite, startX + 32, barY, 32, 32, null);
+            
+            // Right part (note: state 4 middle has typo in original spec, using +32 offset)
+            int rightSrcX = (state == 4) ? srcX + 32 : srcX + 32;
+            BufferedImage rightSprite = allSheet.getSubimage(rightSrcX, 0, 16, 16);
+            g.drawImage(rightSprite, startX + 64, barY, 32, 32, null);
+        } catch (Exception e) {
+            // Fallback if sprite extraction fails
+            g.setColor(Color.RED);
+            g.fillRect(x, y - 20, width, 10);
+            g.setColor(Color.GREEN);
+            int healthWidth = (int)((health / 150.0) * width);
+            g.fillRect(x, y - 20, healthWidth, 10);
+        }
+    }
+}
+
+// Helper class for boss parts
+class BossPart {
+    int offsetX, offsetY;
+    int srcX, srcY;
+    int srcW, srcH;
+    
+    public BossPart(int offsetX, int offsetY, int srcX, int srcY, int srcW, int srcH) {
+        this.offsetX = offsetX;
+        this.offsetY = offsetY;
+        this.srcX = srcX;
+        this.srcY = srcY;
+        this.srcW = srcW;
+        this.srcH = srcH;
+    }
+}
+
+// Boss bullet class
+class BossBullet {
+    int x, y;
+    int speed = 4;
+    BufferedImage bulletSheet;
+    int bulletType;
+    Random random;
+    
+    public BossBullet(int x, int y, BufferedImage sheet) {
+        this.x = x;
+        this.y = y;
+        this.bulletSheet = sheet;
+        this.random = new Random();
+        this.bulletType = random.nextInt(6); // 6 different bullet types
+    }
+    
+    public void update() {
+        y += speed; // Move downward
+    }
+    
+    public void draw(Graphics2D g) {
+        if (bulletSheet == null) {
+            // Fallback drawing
+            g.setColor(Color.ORANGE);
+            g.fillRect(x, y, 16, 16);
+            return;
+        }
+        
+        try {
+            BufferedImage sprite;
+            // Select bullet sprite based on type
+            switch (bulletType) {
+                case 0:
+                    sprite = bulletSheet.getSubimage(176, 16, 16, 16);
+                    break;
+                case 1:
+                    sprite = bulletSheet.getSubimage(176, 48, 16, 16);
+                    break;
+                case 2:
+                    sprite = bulletSheet.getSubimage(176, 176, 16, 16);
+                    break;
+                case 3:
+                    sprite = bulletSheet.getSubimage(48, 16, 16, 16);
+                    break;
+                case 4:
+                    sprite = bulletSheet.getSubimage(48, 48, 16, 16);
+                    break;
+                case 5:
+                    sprite = bulletSheet.getSubimage(48, 176, 16, 16);
+                    break;
+                default:
+                    sprite = bulletSheet.getSubimage(176, 16, 16, 16);
+            }
+            g.drawImage(sprite, x, y, 16, 16, null);
+        } catch (Exception e) {
+            // Fallback if sprite extraction fails
+            g.setColor(Color.ORANGE);
+            g.fillRect(x, y, 16, 16);
+        }
+    }
+}
+
+// Sub-enemy class
+class SubEnemy {
+    int x, y;
+    int width = 64;  // 2 tiles * 16 * 2 scale
+    int height = 32; // 1 tile * 16 * 2 scale
+    int speed = 3;
+    BufferedImage enemySheet;
+    ArrayList<SubEnemyPart> parts;
+    
+    public SubEnemy(int x, int y, BufferedImage sheet) {
+        this.x = x;
+        this.y = y;
+        this.enemySheet = sheet;
+        this.parts = new ArrayList<>();
+        createSubEnemyParts();
+    }
+    
+    private void createSubEnemyParts() {
+        // Sub-enemy 2x1 grid (2 parts) - scaled 2x
+        parts.add(new SubEnemyPart(0, 0, 208, 224, 16, 16));   // 1
+        parts.add(new SubEnemyPart(32, 0, 224, 224, 16, 16));  // 2
+    }
+    
+    public void update() {
+        y += speed; // Move downward
+    }
+    
+    public void draw(Graphics2D g) {
+        if (enemySheet == null) {
+            // Fallback drawing
+            g.setColor(Color.YELLOW);
+            g.fillRect(x, y, width, height);
+            return;
+        }
+        
+        for (SubEnemyPart part : parts) {
+            try {
+                BufferedImage sprite = enemySheet.getSubimage(
+                    part.srcX, part.srcY, part.srcW, part.srcH
+                );
+                int scaledW = part.srcW * 2;
+                int scaledH = part.srcH * 2;
+                g.drawImage(sprite, x + part.offsetX, y + part.offsetY, scaledW, scaledH, null);
+            } catch (Exception e) {
+                // Fallback if sprite extraction fails
+                g.setColor(Color.YELLOW);
+                g.fillRect(x + part.offsetX, y + part.offsetY, part.srcW * 2, part.srcH * 2);
+            }
+        }
+    }
+}
+
+// Helper class for sub-enemy parts
+class SubEnemyPart {
+    int offsetX, offsetY;
+    int srcX, srcY;
+    int srcW, srcH;
+    
+    public SubEnemyPart(int offsetX, int offsetY, int srcX, int srcY, int srcW, int srcH) {
+        this.offsetX = offsetX;
+        this.offsetY = offsetY;
+        this.srcX = srcX;
+        this.srcY = srcY;
+        this.srcW = srcW;
+        this.srcH = srcH;
+    }
+}
+
+// Boss explosion class - 4x4 grid scaled 4 times
+class BossExplosion extends Explosion {
+    
+    public BossExplosion(int x, int y, BufferedImage sheet) {
+        super(x, y, 4, sheet); // Use level 4 for boss explosion
+        this.maxFrames = 20; // Longer animation
+    }
+    
+    @Override
+    protected void createExplosionParts() {
+        // Boss explosion: 4x4 grid scaled 4x
+        for (int row = 0; row < 4; row++) {
+            for (int col = 0; col < 4; col++) {
+                int srcX = 64 + (col * 16);
+                int srcY = 16 + (row * 16);
+                int offsetX = col * 16 * 4;
+                int offsetY = row * 16 * 4;
+                parts.add(new ExplosionPart(offsetX, offsetY, srcX, srcY, 16, 16));
+            }
+        }
+    }
+    
+    @Override
+    public void draw(Graphics2D g) {
+        if (explosionSheet == null) return;
+        
+        // Fade effect based on frame
+        float alpha = 1.0f - (frame / (float)maxFrames);
+        g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha));
+        
+        for (ExplosionPart part : parts) {
+            try {
+                BufferedImage sprite = explosionSheet.getSubimage(
+                    part.srcX, part.srcY, part.srcW, part.srcH
+                );
+                // Scale 4x for boss explosion
+                g.drawImage(sprite, x + part.offsetX, y + part.offsetY, 16 * 4, 16 * 4, null);
+            } catch (Exception e) {
+                // Skip if sprite extraction fails
+            }
+        }
+        
+        // Reset composite
+        g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 1.0f));
+    }
+}
+
+// Health Power-Up class
+class HealthPowerUp {
+    int x, y;
+    int speed = 2;
+    BufferedImage allSheet;
+    
+    public HealthPowerUp(int x, int y, BufferedImage sheet) {
+        this.x = x;
+        this.y = y;
+        this.allSheet = sheet;
+    }
+    
+    public void update() {
+        y += speed; // Move downward slowly
+    }
+    
+    public void draw(Graphics2D g) {
+        if (allSheet == null) {
+            // Fallback drawing
+            g.setColor(Color.GREEN);
+            g.fillRect(x, y, 32, 32);
+            g.setColor(Color.WHITE);
+            g.drawString("+", x + 12, y + 22);
+            return;
+        }
+        
+        try {
+            // Health power-up sprite at 64,112, 16x16
+            BufferedImage sprite = allSheet.getSubimage(64, 112, 16, 16);
+            // Scale 2x for visibility
+            g.drawImage(sprite, x, y, 32, 32, null);
+        } catch (Exception e) {
+            // Fallback if sprite extraction fails
+            g.setColor(Color.GREEN);
+            g.fillRect(x, y, 32, 32);
+            g.setColor(Color.WHITE);
+            g.drawString("+", x + 12, y + 22);
+        }
     }
 }
