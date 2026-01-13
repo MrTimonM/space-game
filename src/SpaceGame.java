@@ -11,7 +11,6 @@ import java.util.Random;
 public class SpaceGame extends JPanel implements ActionListener, KeyListener {
     private static final int WINDOW_WIDTH = 800;
     private static final int WINDOW_HEIGHT = 600;
-    private static final int TILE_SIZE = 16;
     
     private Timer gameTimer;
     private Player player;
@@ -41,11 +40,13 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
     private int autoFireTimer;
     private int lives;
     private int invincibilityTimer;
+    private int score;
     private boolean gameOver;
     private boolean gameWon;
     private int gameTime;
     private boolean bossDefeated;
     private int bossSpawnDelay;
+    private GameState gameState;
     private Clip musicClip;
     private Clip bossMusicClip;
     public static final int ROCK_SCALE = 2;  // Double the rock size
@@ -71,6 +72,8 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
         gameWon = false;
         gameTime = 0;
         bossSpawnDelay = 0;
+        score = 0;
+        gameState = GameState.PLAYING;
         backgroundOffsetY = 0;
         spawnTimer = 0;
         enemySpawnTimer = 0;
@@ -165,6 +168,10 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
     }
     
     private void update() {
+        if (gameState != GameState.PLAYING) {
+            return; // Don't update if not playing
+        }
+        
         if (gameOver || gameWon) {
             return; // Don't update if game is over or won
         }
@@ -343,6 +350,10 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
                     rock.health--;
                     if (rock.health <= 0) {
                         explosions.add(new Explosion(rock.x, rock.y, rock.level, explosionSheet));
+                        // Add points based on rock level
+                        if (rock.level == 1) score += 15;      // Small rock
+                        else if (rock.level == 2) score += 25; // Medium rock
+                        else if (rock.level == 3) score += 50; // Big rock
                         rocks.remove(j);
                     }
                     break;
@@ -359,6 +370,7 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
                     bullets.remove(i);
                     enemies.remove(j);
                     killCount++;
+                    score += 10; // Enemy destroyed
                     break;
                 }
             }
@@ -369,6 +381,7 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
             for (int i = bullets.size() - 1; i >= 0; i--) {
                 if (i >= bullets.size()) continue;
                 Bullet bullet = bullets.get(i);
+                if (boss == null) break; // Boss was destroyed, exit loop
                 if (checkCollision(bullet.x, bullet.y, 16, 16, boss.x, boss.y, boss.width, boss.height)) {
                     bullets.remove(i);
                     boss.health--;
@@ -380,6 +393,7 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
                         gameWon = true;
                         // Switch back to theme music
                         switchToThemeMusic();
+                        break; // Exit loop after boss is defeated
                     }
                 }
             }
@@ -395,6 +409,7 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
                     bullets.remove(i);
                     subEnemies.remove(j);
                     killCount++;
+                    score += 10; // Sub-enemy destroyed (same points as regular enemy)
                     break;
                 }
             }
@@ -640,6 +655,13 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
         // Draw lives
         drawLives(g2d);
         
+        // Draw score in top right corner
+        g2d.setFont(new Font("Arial", Font.BOLD, 24));
+        g2d.setColor(Color.WHITE);
+        String scoreText = "Score: " + score;
+        int scoreWidth = g2d.getFontMetrics().stringWidth(scoreText);
+        g2d.drawString(scoreText, WINDOW_WIDTH - scoreWidth - 20, 30);
+        
         // Draw game over message
         if (gameOver) {
             g2d.setFont(new Font("Arial", Font.BOLD, 48));
@@ -712,12 +734,15 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
     
     @Override
     public void keyPressed(KeyEvent e) {
-        player.keyPressed(e);
+        int key = e.getKeyCode();
         
-        // Restart game on R key
-        if (e.getKeyCode() == KeyEvent.VK_R && (gameOver || gameWon)) {
+        // Restart from game over or game won
+        if ((gameOver || gameWon) && key == KeyEvent.VK_R) {
             restartGame();
+            return;
         }
+        
+        player.keyPressed(e);
     }
     
     private void restartGame() {
@@ -741,6 +766,7 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
         spawnTimer = 0;
         enemySpawnTimer = 0;
         bossSpawnDelay = 0;
+        gameState = GameState.PLAYING;
         
         // Reset player position
         player.x = WINDOW_WIDTH / 2 - 32;
@@ -769,6 +795,11 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
         frame.setResizable(false);
         frame.setVisible(true);
     }
+}
+
+// Game state enumeration
+enum GameState {
+    PLAYING
 }
 
 // Player class
@@ -965,6 +996,7 @@ class Rock {
             parts.add(new RockPart(32, 32, 32, 96, 16, 16));   // e
         }
     }
+    
     
     private void calculateDimensions() {
         if (level == 1) {
@@ -1323,7 +1355,7 @@ class Boss {
     int x, y;
     int width = 144;  // 3 tiles * 16 * 3 scale
     int height = 192; // 4 tiles * 16 * 3 scale
-    int health = 150;
+    int health = 120;
     int speed = 2;
     int moveCounter = 0;
     BufferedImage enemySheet;
@@ -1437,22 +1469,22 @@ class Boss {
         }
         
         // Determine which health bar state to show (1-6)
-        // State 1: 150-126 health (full)
-        // State 2: 125-101 health
-        // State 3: 100-76 health
-        // State 4: 75-51 health
-        // State 5: 50-26 health
-        // State 6: 25-1 health (almost dead)
+        // State 1: 120-101 health (full)
+        // State 2: 100-81 health
+        // State 3: 80-61 health
+        // State 4: 60-41 health
+        // State 5: 40-21 health
+        // State 6: 20-1 health (almost dead)
         int state;
-        if (health > 125) {
+        if (health > 100) {
             state = 1;
-        } else if (health > 100) {
+        } else if (health > 80) {
             state = 2;
-        } else if (health > 75) {
+        } else if (health > 60) {
             state = 3;
-        } else if (health > 50) {
+        } else if (health > 40) {
             state = 4;
-        } else if (health > 25) {
+        } else if (health > 20) {
             state = 5;
         } else {
             state = 6;
