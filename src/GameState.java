@@ -1,4 +1,5 @@
 // Game state enumeration
 enum GameState {
-    PLAYING
+    PLAYING,
+    PAUSED
 }

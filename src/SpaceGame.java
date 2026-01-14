@@ -49,9 +49,19 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
     private GameState gameState;
     private Clip musicClip;
     private Clip bossMusicClip;
+    private Font customFont;
+    private Font scoreFont;
+    private Font pauseMenuFont;
+    private int pauseMenuSelection = 0;
+    private String[] pauseMenuOptions = {"RESUME GAME", "MUSIC VOLUME", "BACK TO MENU"};
+    private int gameOverMenuSelection = 0;
+    private String[] gameOverMenuOptions = {"PLAY AGAIN", "BACK TO MENU"};
+    private float gameVolume = 0.7f;
+    private GameWindow gameWindow;
     public static final int ROCK_SCALE = 2;  // Double the rock size
     
-    public SpaceGame() {
+    public SpaceGame(GameWindow gameWindow) {
+        this.gameWindow = gameWindow;
         setPreferredSize(new Dimension(WINDOW_WIDTH, WINDOW_HEIGHT));
         setBackground(Color.BLACK);
         setFocusable(true);
@@ -104,9 +114,19 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
             uiSheet = ImageIO.read(new File("../Assets/UI_sprites-0001.png"));
             explosionSheet = ImageIO.read(new File("../Assets/Explosion-0001.png"));
             allSheet = ImageIO.read(new File("../Assets/All.png"));
+            
+            // Load custom font
+            Font baseFont = Font.createFont(Font.TRUETYPE_FONT, new File("../Assets/VT323-Regular.ttf"));
+            customFont = baseFont.deriveFont(Font.PLAIN, 24f);
+            scoreFont = baseFont.deriveFont(Font.BOLD, 36f);
+            pauseMenuFont = baseFont.deriveFont(Font.PLAIN, 32f);
         } catch (Exception e) {
             System.err.println("Error loading images: " + e.getMessage());
             e.printStackTrace();
+            // Fallback fonts
+            customFont = new Font("Monospaced", Font.PLAIN, 24);
+            scoreFont = new Font("Monospaced", Font.BOLD, 36);
+            pauseMenuFont = new Font("Monospaced", Font.PLAIN, 32);
         }
     }
     
@@ -655,34 +675,371 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
         // Draw lives
         drawLives(g2d);
         
-        // Draw score in top right corner
-        g2d.setFont(new Font("Arial", Font.BOLD, 24));
-        g2d.setColor(Color.WHITE);
-        String scoreText = "Score: " + score;
-        int scoreWidth = g2d.getFontMetrics().stringWidth(scoreText);
-        g2d.drawString(scoreText, WINDOW_WIDTH - scoreWidth - 20, 30);
+        // Draw score in top right corner with beautiful styling
+        g2d.setFont(scoreFont);
+        String scoreText = "SCORE: " + score;
+        FontMetrics fm = g2d.getFontMetrics();
+        int scoreWidth = fm.stringWidth(scoreText);
+        int scoreX = WINDOW_WIDTH - scoreWidth - 20;
+        int scoreY = 40;
         
-        // Draw game over message
+        // Shadow effect
+        g2d.setColor(new Color(0, 0, 0, 150));
+        g2d.drawString(scoreText, scoreX + 2, scoreY + 2);
+        
+        // Glow effect
+        g2d.setColor(new Color(138, 43, 226, 100));
+        g2d.drawString(scoreText, scoreX - 1, scoreY - 1);
+        g2d.drawString(scoreText, scoreX + 1, scoreY + 1);
+        
+        // Main text
+        g2d.setColor(new Color(200, 150, 255));
+        g2d.drawString(scoreText, scoreX, scoreY);
+        
+        // Draw game over menu
         if (gameOver) {
-            g2d.setFont(new Font("Arial", Font.BOLD, 48));
-            g2d.setColor(Color.RED);
-            g2d.drawString("GAME OVER", WINDOW_WIDTH / 2 - 150, WINDOW_HEIGHT / 2);
-            g2d.setFont(new Font("Arial", Font.PLAIN, 24));
-            g2d.setColor(Color.WHITE);
-            g2d.drawString("Final Kills: " + killCount, WINDOW_WIDTH / 2 - 80, WINDOW_HEIGHT / 2 + 50);
-            g2d.drawString("Press R to Restart", WINDOW_WIDTH / 2 - 100, WINDOW_HEIGHT / 2 + 90);
+            drawGameOverMenu(g2d);
         }
         
-        // Draw win message
+        // Draw win menu
         if (gameWon) {
-            g2d.setFont(new Font("Arial", Font.BOLD, 48));
-            g2d.setColor(Color.GREEN);
-            g2d.drawString("YOU WIN!", WINDOW_WIDTH / 2 - 130, WINDOW_HEIGHT / 2);
-            g2d.setFont(new Font("Arial", Font.PLAIN, 24));
-            g2d.setColor(Color.WHITE);
-            g2d.drawString("Boss Defeated!", WINDOW_WIDTH / 2 - 80, WINDOW_HEIGHT / 2 + 50);
-            g2d.drawString("Press R to Play Again", WINDOW_WIDTH / 2 - 110, WINDOW_HEIGHT / 2 + 90);
+            drawWinMenu(g2d);
         }
+        
+        // Draw pause overlay
+        if (gameState == GameState.PAUSED && !gameOver && !gameWon) {
+            drawPauseOverlay(g2d);
+        }
+    }
+    
+    private void drawPauseOverlay(Graphics2D g2d) {
+        // Semi-transparent dark overlay
+        g2d.setColor(new Color(0, 0, 0, 180));
+        g2d.fillRect(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
+        
+        // Pause box - larger to accommodate menu
+        int boxWidth = 500;
+        int boxHeight = 400;
+        int boxX = (WINDOW_WIDTH - boxWidth) / 2;
+        int boxY = (WINDOW_HEIGHT - boxHeight) / 2;
+        
+        // Box background
+        g2d.setColor(new Color(40, 20, 60, 220));
+        g2d.fillRoundRect(boxX, boxY, boxWidth, boxHeight, 20, 20);
+        
+        // Box border
+        g2d.setColor(new Color(200, 150, 255));
+        g2d.setStroke(new BasicStroke(3));
+        g2d.drawRoundRect(boxX, boxY, boxWidth, boxHeight, 20, 20);
+        
+        // PAUSED text
+        if (customFont != null) {
+            g2d.setFont(customFont.deriveFont(Font.BOLD, 50f));
+        } else {
+            g2d.setFont(new Font("Monospaced", Font.BOLD, 50));
+        }
+        g2d.setColor(new Color(255, 200, 100));
+        String pauseText = "PAUSED";
+        FontMetrics fm = g2d.getFontMetrics();
+        int textX = (WINDOW_WIDTH - fm.stringWidth(pauseText)) / 2;
+        g2d.drawString(pauseText, textX, boxY + 70);
+        
+        // Menu options
+        g2d.setFont(pauseMenuFont);
+        int startY = boxY + 140;
+        int spacing = 60;
+        
+        for (int i = 0; i < pauseMenuOptions.length; i++) {
+            int y = startY + i * spacing;
+            boolean isSelected = (i == pauseMenuSelection);
+            
+            String option = pauseMenuOptions[i];
+            fm = g2d.getFontMetrics();
+            int textWidth = fm.stringWidth(option);
+            
+            // For selected music volume, position text to accommodate volume bar
+            int x;
+            if (option.equals("MUSIC VOLUME") && isSelected) {
+                int totalWidth = textWidth + 150;
+                x = (WINDOW_WIDTH - totalWidth) / 2;
+            } else {
+                x = (WINDOW_WIDTH - textWidth) / 2;
+            }
+            
+            if (isSelected) {
+                // Selected option - draw background box
+                int selBoxWidth = textWidth + 40;
+                if (option.equals("MUSIC VOLUME")) {
+                    selBoxWidth = textWidth + 190;
+                }
+                
+                g2d.setColor(new Color(138, 43, 226, 150));
+                g2d.fillRoundRect(x - 20, y - 35, selBoxWidth, 50, 10, 10);
+                
+                // Border
+                g2d.setColor(new Color(255, 255, 255));
+                g2d.setStroke(new BasicStroke(2));
+                g2d.drawRoundRect(x - 20, y - 35, selBoxWidth, 50, 10, 10);
+                
+                // Arrow indicator
+                g2d.setColor(new Color(255, 200, 100));
+                g2d.fillPolygon(new int[]{x - 40, x - 50, x - 40}, 
+                               new int[]{y - 15, y - 10, y - 5}, 3);
+                
+                // Text
+                g2d.setColor(Color.WHITE);
+                g2d.drawString(option, x, y);
+                
+                // Volume bar for music option
+                if (option.equals("MUSIC VOLUME")) {
+                    drawPauseVolumeBar(g2d, x + textWidth + 20, y - 20);
+                }
+            } else {
+                // Unselected option
+                g2d.setColor(new Color(150, 150, 180));
+                g2d.drawString(option, x, y);
+            }
+        }
+        
+        // Footer instructions
+        if (customFont != null) {
+            g2d.setFont(customFont.deriveFont(18f));
+        } else {
+            g2d.setFont(new Font("Monospaced", Font.PLAIN, 18));
+        }
+        g2d.setColor(new Color(120, 120, 140));
+        String footer = "UP/DOWN arrows to navigate | ENTER to select | Score: " + score;
+        fm = g2d.getFontMetrics();
+        int footerX = (WINDOW_WIDTH - fm.stringWidth(footer)) / 2;
+        g2d.drawString(footer, footerX, boxY + boxHeight - 30);
+    }
+    
+    private void drawPauseVolumeBar(Graphics2D g2d, int x, int y) {
+        int barWidth = 120;
+        int barHeight = 20;
+        int filledWidth = (int)(barWidth * gameVolume);
+        
+        // Background
+        g2d.setColor(new Color(50, 50, 70));
+        g2d.fillRect(x, y, barWidth, barHeight);
+        
+        // Filled portion
+        g2d.setColor(new Color(100, 200, 100));
+        g2d.fillRect(x, y, filledWidth, barHeight);
+        
+        // Border
+        g2d.setColor(new Color(150, 150, 180));
+        g2d.drawRect(x, y, barWidth, barHeight);
+    }
+    
+    private void drawGameOverMenu(Graphics2D g2d) {
+        // Semi-transparent dark overlay
+        g2d.setColor(new Color(0, 0, 0, 200));
+        g2d.fillRect(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
+        
+        // Menu box
+        int boxWidth = 500;
+        int boxHeight = 450;
+        int boxX = (WINDOW_WIDTH - boxWidth) / 2;
+        int boxY = (WINDOW_HEIGHT - boxHeight) / 2;
+        
+        // Box background
+        g2d.setColor(new Color(60, 20, 40, 230));
+        g2d.fillRoundRect(boxX, boxY, boxWidth, boxHeight, 20, 20);
+        
+        // Box border
+        g2d.setColor(new Color(255, 80, 80));
+        g2d.setStroke(new BasicStroke(3));
+        g2d.drawRoundRect(boxX, boxY, boxWidth, boxHeight, 20, 20);
+        
+        // GAME OVER text
+        if (customFont != null) {
+            g2d.setFont(customFont.deriveFont(Font.BOLD, 60f));
+        } else {
+            g2d.setFont(new Font("Monospaced", Font.BOLD, 60));
+        }
+        g2d.setColor(new Color(255, 100, 100));
+        String gameOverText = "GAME OVER";
+        FontMetrics fm = g2d.getFontMetrics();
+        int textX = (WINDOW_WIDTH - fm.stringWidth(gameOverText)) / 2;
+        g2d.drawString(gameOverText, textX, boxY + 80);
+        
+        // Score display
+        if (scoreFont != null) {
+            g2d.setFont(scoreFont.deriveFont(36f));
+        } else {
+            g2d.setFont(new Font("Monospaced", Font.BOLD, 36));
+        }
+        g2d.setColor(new Color(200, 150, 255));
+        String finalScore = "FINAL SCORE: " + score;
+        fm = g2d.getFontMetrics();
+        int scoreTextX = (WINDOW_WIDTH - fm.stringWidth(finalScore)) / 2;
+        g2d.drawString(finalScore, scoreTextX, boxY + 150);
+        
+        // Stats
+        if (customFont != null) {
+            g2d.setFont(customFont.deriveFont(24f));
+        } else {
+            g2d.setFont(new Font("Monospaced", Font.PLAIN, 24));
+        }
+        g2d.setColor(new Color(180, 180, 200));
+        String kills = "Enemies Destroyed: " + killCount;
+        fm = g2d.getFontMetrics();
+        int killsX = (WINDOW_WIDTH - fm.stringWidth(kills)) / 2;
+        g2d.drawString(kills, killsX, boxY + 200);
+        
+        // Menu options
+        g2d.setFont(pauseMenuFont);
+        int startY = boxY + 270;
+        int spacing = 60;
+        
+        for (int i = 0; i < gameOverMenuOptions.length; i++) {
+            int y = startY + i * spacing;
+            boolean isSelected = (i == gameOverMenuSelection);
+            
+            String option = gameOverMenuOptions[i];
+            fm = g2d.getFontMetrics();
+            int textWidth = fm.stringWidth(option);
+            int x = (WINDOW_WIDTH - textWidth) / 2;
+            
+            if (isSelected) {
+                // Selected option
+                g2d.setColor(new Color(200, 50, 50, 150));
+                g2d.fillRoundRect(x - 20, y - 35, textWidth + 40, 50, 10, 10);
+                
+                g2d.setColor(new Color(255, 255, 255));
+                g2d.setStroke(new BasicStroke(2));
+                g2d.drawRoundRect(x - 20, y - 35, textWidth + 40, 50, 10, 10);
+                
+                // Arrow
+                g2d.setColor(new Color(255, 200, 100));
+                g2d.fillPolygon(new int[]{x - 40, x - 50, x - 40}, 
+                               new int[]{y - 15, y - 10, y - 5}, 3);
+                
+                g2d.setColor(Color.WHITE);
+                g2d.drawString(option, x, y);
+            } else {
+                g2d.setColor(new Color(150, 150, 180));
+                g2d.drawString(option, x, y);
+            }
+        }
+        
+        // Footer
+        if (customFont != null) {
+            g2d.setFont(customFont.deriveFont(18f));
+        } else {
+            g2d.setFont(new Font("Monospaced", Font.PLAIN, 18));
+        }
+        g2d.setColor(new Color(120, 120, 140));
+        String footer = "UP/DOWN to navigate | ENTER to select";
+        fm = g2d.getFontMetrics();
+        int footerX = (WINDOW_WIDTH - fm.stringWidth(footer)) / 2;
+        g2d.drawString(footer, footerX, boxY + boxHeight - 30);
+    }
+    
+    private void drawWinMenu(Graphics2D g2d) {
+        // Semi-transparent dark overlay
+        g2d.setColor(new Color(0, 0, 0, 200));
+        g2d.fillRect(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
+        
+        // Menu box
+        int boxWidth = 500;
+        int boxHeight = 450;
+        int boxX = (WINDOW_WIDTH - boxWidth) / 2;
+        int boxY = (WINDOW_HEIGHT - boxHeight) / 2;
+        
+        // Box background
+        g2d.setColor(new Color(20, 60, 40, 230));
+        g2d.fillRoundRect(boxX, boxY, boxWidth, boxHeight, 20, 20);
+        
+        // Box border
+        g2d.setColor(new Color(100, 255, 100));
+        g2d.setStroke(new BasicStroke(3));
+        g2d.drawRoundRect(boxX, boxY, boxWidth, boxHeight, 20, 20);
+        
+        // YOU WIN text
+        if (customFont != null) {
+            g2d.setFont(customFont.deriveFont(Font.BOLD, 60f));
+        } else {
+            g2d.setFont(new Font("Monospaced", Font.BOLD, 60));
+        }
+        g2d.setColor(new Color(100, 255, 100));
+        String winText = "YOU WIN!";
+        FontMetrics fm = g2d.getFontMetrics();
+        int textX = (WINDOW_WIDTH - fm.stringWidth(winText)) / 2;
+        g2d.drawString(winText, textX, boxY + 80);
+        
+        // Victory message
+        if (customFont != null) {
+            g2d.setFont(customFont.deriveFont(28f));
+        } else {
+            g2d.setFont(new Font("Monospaced", Font.PLAIN, 28));
+        }
+        g2d.setColor(new Color(150, 255, 150));
+        String victoryMsg = "Boss Defeated!";
+        fm = g2d.getFontMetrics();
+        int victoryX = (WINDOW_WIDTH - fm.stringWidth(victoryMsg)) / 2;
+        g2d.drawString(victoryMsg, victoryX, boxY + 130);
+        
+        // Score display
+        if (scoreFont != null) {
+            g2d.setFont(scoreFont.deriveFont(36f));
+        } else {
+            g2d.setFont(new Font("Monospaced", Font.BOLD, 36));
+        }
+        g2d.setColor(new Color(200, 150, 255));
+        String finalScore = "FINAL SCORE: " + score;
+        fm = g2d.getFontMetrics();
+        int scoreTextX = (WINDOW_WIDTH - fm.stringWidth(finalScore)) / 2;
+        g2d.drawString(finalScore, scoreTextX, boxY + 190);
+        
+        // Menu options
+        g2d.setFont(pauseMenuFont);
+        int startY = boxY + 270;
+        int spacing = 60;
+        
+        for (int i = 0; i < gameOverMenuOptions.length; i++) {
+            int y = startY + i * spacing;
+            boolean isSelected = (i == gameOverMenuSelection);
+            
+            String option = gameOverMenuOptions[i];
+            fm = g2d.getFontMetrics();
+            int textWidth = fm.stringWidth(option);
+            int x = (WINDOW_WIDTH - textWidth) / 2;
+            
+            if (isSelected) {
+                // Selected option
+                g2d.setColor(new Color(50, 200, 50, 150));
+                g2d.fillRoundRect(x - 20, y - 35, textWidth + 40, 50, 10, 10);
+                
+                g2d.setColor(new Color(255, 255, 255));
+                g2d.setStroke(new BasicStroke(2));
+                g2d.drawRoundRect(x - 20, y - 35, textWidth + 40, 50, 10, 10);
+                
+                // Arrow
+                g2d.setColor(new Color(255, 200, 100));
+                g2d.fillPolygon(new int[]{x - 40, x - 50, x - 40}, 
+                               new int[]{y - 15, y - 10, y - 5}, 3);
+                
+                g2d.setColor(Color.WHITE);
+                g2d.drawString(option, x, y);
+            } else {
+                g2d.setColor(new Color(150, 150, 180));
+                g2d.drawString(option, x, y);
+            }
+        }
+        
+        // Footer
+        if (customFont != null) {
+            g2d.setFont(customFont.deriveFont(18f));
+        } else {
+            g2d.setFont(new Font("Monospaced", Font.PLAIN, 18));
+        }
+        g2d.setColor(new Color(120, 120, 140));
+        String footer = "UP/DOWN to navigate | ENTER to select";
+        fm = g2d.getFontMetrics();
+        int footerX = (WINDOW_WIDTH - fm.stringWidth(footer)) / 2;
+        g2d.drawString(footer, footerX, boxY + boxHeight - 30);
     }
     
     private void drawBackground(Graphics2D g2d) {
@@ -736,13 +1093,70 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
     public void keyPressed(KeyEvent e) {
         int key = e.getKeyCode();
         
+        // Handle game over/win menu navigation
+        if ((gameOver || gameWon) && key != KeyEvent.VK_R) {
+            switch (key) {
+                case KeyEvent.VK_UP:
+                    gameOverMenuSelection = (gameOverMenuSelection - 1 + gameOverMenuOptions.length) % gameOverMenuOptions.length;
+                    return;
+                case KeyEvent.VK_DOWN:
+                    gameOverMenuSelection = (gameOverMenuSelection + 1) % gameOverMenuOptions.length;
+                    return;
+                case KeyEvent.VK_ENTER:
+                    handleGameOverMenuSelection();
+                    return;
+            }
+        }
+        
+        // Handle pause menu navigation
+        if (gameState == GameState.PAUSED && !gameOver && !gameWon) {
+            switch (key) {
+                case KeyEvent.VK_UP:
+                    pauseMenuSelection = (pauseMenuSelection - 1 + pauseMenuOptions.length) % pauseMenuOptions.length;
+                    return;
+                case KeyEvent.VK_DOWN:
+                    pauseMenuSelection = (pauseMenuSelection + 1) % pauseMenuOptions.length;
+                    return;
+                case KeyEvent.VK_LEFT:
+                    if (pauseMenuOptions[pauseMenuSelection].equals("MUSIC VOLUME")) {
+                        gameVolume = Math.max(0.0f, gameVolume - 0.1f);
+                        updateGameVolume();
+                    }
+                    return;
+                case KeyEvent.VK_RIGHT:
+                    if (pauseMenuOptions[pauseMenuSelection].equals("MUSIC VOLUME")) {
+                        gameVolume = Math.min(1.0f, gameVolume + 0.1f);
+                        updateGameVolume();
+                    }
+                    return;
+                case KeyEvent.VK_ENTER:
+                    handlePauseMenuSelection();
+                    return;
+                case KeyEvent.VK_ESCAPE:
+                    gameState = GameState.PLAYING;
+                    return;
+            }
+        }
+        
+        // Toggle pause with ESC
+        if (key == KeyEvent.VK_ESCAPE && !gameOver && !gameWon) {
+            if (gameState == GameState.PLAYING) {
+                gameState = GameState.PAUSED;
+                pauseMenuSelection = 0; // Reset to first option
+            }
+            return;
+        }
+        
         // Restart from game over or game won
         if ((gameOver || gameWon) && key == KeyEvent.VK_R) {
             restartGame();
             return;
         }
         
-        player.keyPressed(e);
+        // Only allow player controls when playing
+        if (gameState == GameState.PLAYING) {
+            player.keyPressed(e);
+        }
     }
     
     private void restartGame() {
@@ -767,6 +1181,7 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
         enemySpawnTimer = 0;
         bossSpawnDelay = 0;
         gameState = GameState.PLAYING;
+        gameOverMenuSelection = 0; // Reset menu selection
         
         // Reset player position
         player.x = WINDOW_WIDTH / 2 - 32;
@@ -776,23 +1191,88 @@ public class SpaceGame extends JPanel implements ActionListener, KeyListener {
         switchToThemeMusic();
     }
     
+    private void handlePauseMenuSelection() {
+        String selected = pauseMenuOptions[pauseMenuSelection];
+        
+        switch (selected) {
+            case "RESUME GAME":
+                gameState = GameState.PLAYING;
+                break;
+            case "MUSIC VOLUME":
+                // Volume is adjusted with arrow keys, nothing to do on enter
+                break;
+            case "BACK TO MENU":
+                returnToMenu();
+                break;
+        }
+    }
+    
+    private void handleGameOverMenuSelection() {
+        String selected = gameOverMenuOptions[gameOverMenuSelection];
+        
+        switch (selected) {
+            case "PLAY AGAIN":
+                restartGame();
+                break;
+            case "BACK TO MENU":
+                returnToMenu();
+                break;
+        }
+    }
+    
+    private void updateGameVolume() {
+        if (musicClip != null && musicClip.isControlSupported(FloatControl.Type.MASTER_GAIN)) {
+            FloatControl volumeControl = (FloatControl) musicClip.getControl(FloatControl.Type.MASTER_GAIN);
+            float dB = (float) (Math.log(Math.max(0.01, gameVolume)) / Math.log(10.0) * 20.0);
+            volumeControl.setValue(dB);
+        }
+        if (bossMusicClip != null && bossMusicClip.isControlSupported(FloatControl.Type.MASTER_GAIN)) {
+            FloatControl volumeControl = (FloatControl) bossMusicClip.getControl(FloatControl.Type.MASTER_GAIN);
+            float dB = (float) (Math.log(Math.max(0.01, gameVolume)) / Math.log(10.0) * 20.0);
+            volumeControl.setValue(dB);
+        }
+    }
+    
+    private void returnToMenu() {
+        // Cleanup will be called by GameWindow.showMenu()
+        // Just trigger the menu switch
+        if (gameWindow != null) {
+            SwingUtilities.invokeLater(() -> {
+                gameWindow.showMenu();
+            });
+        }
+    }
+    
+    public void cleanup() {
+        // Stop game timer
+        if (gameTimer != null) {
+            gameTimer.stop();
+        }
+        
+        // Stop all music
+        if (musicClip != null) {
+            if (musicClip.isRunning()) {
+                musicClip.stop();
+            }
+            musicClip.close();
+        }
+        
+        if (bossMusicClip != null) {
+            if (bossMusicClip.isRunning()) {
+                bossMusicClip.stop();
+            }
+            bossMusicClip.close();
+        }
+    }
+    
     @Override
     public void keyReleased(KeyEvent e) {
-        player.keyReleased(e);
+        // Only allow player controls when playing
+        if (gameState == GameState.PLAYING) {
+            player.keyReleased(e);
+        }
     }
     
     @Override
     public void keyTyped(KeyEvent e) {}
-    
-    public static void main(String[] args) {
-        JFrame frame = new JFrame("Space Game");
-        SpaceGame game = new SpaceGame();
-        
-        frame.add(game);
-        frame.pack();
-        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        frame.setLocationRelativeTo(null);
-        frame.setResizable(false);
-        frame.setVisible(true);
-    }
 }
